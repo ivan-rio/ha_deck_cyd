@@ -1,0 +1,524 @@
+substitutions:
+  SCREEN_MAIN: master
+  SCREEN_ROOMS: rooms
+  SCREEN_LED: led
+  SCREEN_THERMOSTAT: thermostat
+  SCREEN_TEMPS: temperatures
+  THERMOSTAT_ENTITY: climate.termostat
+
+esphome:
+  name: ha-deck-cyd
+  friendly_name: HA_Deck_CYD
+  libraries:
+    - SPI
+    - Wire
+    - XPT2046_Touchscreen=https://github.com/PaulStoffregen/XPT2046_Touchscreen.git#v1.4
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+
+api:
+
+ota:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/ivan-rio/ha_deck_cyd
+      ref: main
+    components: [ hd_device_cyd]
+  - source:
+      type: git
+      url: https://github.com/strange-v/ha_deck
+      ref: main
+    components: [ ha_deck ]
+
+web_server:
+  port: 80
+
+sensor:
+  - platform: homeassistant
+    id: light_01_brightness
+    entity_id: light.wled_table_2
+    attribute: brightness
+
+  - platform: homeassistant
+    id: light_02_brightness
+    entity_id: light.wled_light
+    attribute: brightness
+
+  - platform: homeassistant
+    id: weather_temp
+    entity_id: weather.golovna
+    attribute: temperature
+
+  - platform: homeassistant
+    id: thermostat_set
+    entity_id: $THERMOSTAT_ENTITY
+    attribute: temperature
+    unit_of_measurement: "°C"
+
+  - platform: homeassistant
+    id: thermostat_current
+    entity_id: $THERMOSTAT_ENTITY
+    attribute: current_temperature
+    unit_of_measurement: "°C"
+
+  - platform: homeassistant
+    id: temp_cabinet
+    entity_id: sensor.tz3000_xr3htd96_ts0201_temperature
+    unit_of_measurement: "°C"
+
+text_sensor:
+  - platform: homeassistant
+    id: light_01_state
+    entity_id: light.wled_table_2
+
+  - platform: homeassistant
+    id: light_02_state
+    entity_id: light.wled_light
+
+  - platform: homeassistant
+    id: switch_01_state
+    entity_id: switch.smart_plug_03_socket_1
+    
+
+
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: Europe/Kyiv
+    on_time:
+      - cron: '* * * * * *'
+        then:
+          lambda: |-
+            char buff[10] = "-";
+            auto time = id(sntp_time).now();
+            if (time.is_valid())
+              sprintf(buff, "%02d:%02d:%02d", time.hour, time.minute, time.second);
+            id(local_time).set_value(std::string(buff));
+
+number:
+  - platform: template
+    id: screen_brightness
+    name: Active screen brightness
+    min_value: 0
+    max_value: 100
+    step: 5
+    initial_value: 75
+    restore_value: true
+    set_action:
+      - lambda: |-
+          if (!id(deck).get_inactivity())
+            id(device).set_brightness(x);
+  - platform: template
+    id: inactive_screen_brightness
+    name: Inactive screen brightness
+    min_value: 0
+    max_value: 100
+    step: 5
+    initial_value: 30
+    restore_value: true
+    set_action:
+      - lambda: |-
+          if (id(deck).get_inactivity())
+            id(device).set_brightness(x);
+  - platform: template
+    id: dummy_temperature_sensor
+    name: Dummy Temperature
+    min_value: -10
+    max_value: 30
+    step: 0.5
+    initial_value: 20.2
+    optimistic: true
+    mode: box
+
+output:
+  - platform: ledc
+    pin: 10
+    id: out_10
+
+switch:
+  - platform: template
+    name: "Light 01"
+    id: light_switch_01
+    optimistic: true
+  - platform: template
+    name: "Light 02"
+    id: light_switch_02
+    optimistic: true
+  - platform: template
+    name: "Switch 01"
+    id: switch_01
+    optimistic: true
+
+hd_device_cyd:
+  id: device
+  brightness: 75
+
+ha_deck:
+  id: deck
+  main_screen: ${SCREEN_MAIN}
+  inactivity:
+    period: 60 # seconds
+    #blank_screen: true
+  on_inactivity_change:
+    lambda:  |-
+      if (x) {
+        id(device).set_brightness(id(inactive_screen_brightness).state);
+      } else {
+        id(device).set_brightness(id(screen_brightness).state);
+      }
+  screens:
+    - name: ${SCREEN_MAIN}
+      widgets:
+        - type: value-card
+          id: local_time
+          position: 10, 10
+          dimensions: 196x105
+          text: "Kyiv (Ukraine)"
+          enabled: return true;
+          on_click:
+            lambda: |-
+                id(deck).switch_screen("$SCREEN_ROOMS");
+
+        - type: value-card
+          id: temperature
+          position: 216, 10
+          dimensions: 93x105
+          text: °C
+          icon: 󰔏
+          enabled: return true;
+          value: |-
+            char buff[10] = "-";
+            sprintf(buff, "%.1f", id(weather_temp).state);
+            return std::string(buff);
+          on_click:
+            then:
+            - lambda: |-
+                id(deck).switch_screen("$SCREEN_TEMPS");
+
+        - type: button
+          position: 10, 125
+          dimensions: 93x105
+          text: "Lights"
+          icon: 󰝩
+          enabled: return true;
+          on_click:
+            lambda: id(deck).switch_screen("$SCREEN_LED");
+          on_long_press:
+            - logger.log: "Lights long pressed"
+
+        - type: button
+          position: 113, 125
+          dimensions: 93x105
+          text: "Thermostat"
+          icon: 󰢑
+          enabled: return true;
+          on_click:
+            lambda: |-
+                id(deck).switch_screen("$SCREEN_THERMOSTAT");
+
+        - type: button
+          position: 216, 125
+          dimensions: 93x105
+          text: "Ender"
+          icon: 󰐫
+          toggle: true
+          enabled: return true;
+          checked: |-
+            if(id(switch_01_state).state == "on") { return 1; }
+            else { return 0; }
+          on_turn_on:
+            - homeassistant.service:
+                service: switch.turn_on
+                data:
+                  entity_id: switch.smart_plug_03_socket_1
+            - switch.turn_on: switch_01
+          on_turn_off:
+            - homeassistant.service:
+                service: switch.turn_off
+                data:
+                  entity_id: switch.smart_plug_03_socket_1
+            - switch.turn_off: switch_01
+
+    - name: ${SCREEN_ROOMS}
+      widgets:
+        - type: button
+          position: 8, 8
+          icon: 󰁍
+          enabled: |-
+            return true;
+          on_click:
+            then:
+            - lambda: |-
+                id(deck).switch_screen("$SCREEN_MAIN");
+
+        - type: button
+          position: 126, 8
+          text: "Living Room"
+          icon: 󰒹
+          enabled: |-
+            return true;
+
+        - type: button
+          position: 244, 8
+          text: "Main Bedroom"
+          icon: 󰿒
+          enabled: |-
+            return true;
+
+        - type: button
+          position: 362, 8
+          text: "Kids Bedroom"
+          icon: 󰢠
+          enabled: |-
+            return true;
+
+        - type: button
+          position: 8, 112
+          text: "Kitchen"
+          icon: 󰩰
+          enabled: |-
+            return true;
+
+        - type: button
+          position: 126, 112
+          text: "Bathroom"
+          icon: 󰦠
+          enabled: |-
+            return true;
+
+        - type: button
+          position: 244, 112
+          text: "Toilet"
+          icon: 󰦫
+          enabled: |-
+            return true;
+
+        - type: button
+          position: 362, 112
+          text: "Corridor"
+          icon: 󰾑
+          enabled: |-
+            return true;
+
+        - type: button
+          position: 8, 216
+          text: "Hallway"
+          icon: 󰷺
+          enabled: |-
+            return true;
+
+
+    - name: ${SCREEN_LED}
+      widgets:
+        - type: button
+          position: 0, 10
+          dimensions: 48x220
+          icon: 󰅁
+          enabled: return true;
+          on_click:
+            - lambda: id(deck).switch_screen("$SCREEN_MAIN");
+
+        - type: slider
+          position: 80, 8
+          dimensions: 60x223
+          text: Screen
+          min: 0
+          max: 100
+          enabled: return true;
+          value: return id(device).get_brightness();
+          on_change:
+            lambda: id(device).set_brightness(x);
+
+        - type: slider
+          position: 155, 8
+          dimensions: 60x165
+          #text: "Light 1"
+          min: 1
+          max: 255
+          enabled: return true;
+          value: |-
+            if(id(light_01_brightness).state <= 255) { return id(light_01_brightness).state; }
+            else { return 0; }
+          on_change:
+            - homeassistant.service:
+                service: light.turn_on
+                data:
+                  entity_id: light.wled_table_2
+                  brightness: !lambda return x;
+
+        - type: button
+          position: 155, 182
+          dimensions: 60x50
+          text: "Table"
+          #icon: 󰖼
+          toggle: true
+          enabled: return true;
+          checked: |-
+            if(id(light_01_state).state == "on") { return 1; }
+            else { return 0; }
+          on_turn_on:
+            - homeassistant.service:
+                service: light.turn_on
+                data:
+                  entity_id: light.wled_table_2
+            - switch.turn_on: light_switch_01
+          on_turn_off:
+            - homeassistant.service:
+                service: light.turn_off
+                data:
+                  entity_id: light.wled_table_2
+            - switch.turn_off: light_switch_01
+
+        - type: slider
+          position: 230, 8
+          dimensions: 60x165
+          #text: "Light 2"
+          min: 1
+          max: 255
+          enabled: return true;
+          value: |-
+            if(id(light_02_brightness).state <= 255) { return id(light_02_brightness).state; }
+            else { return 0; }
+          on_change:
+            - homeassistant.service:
+                service: light.turn_on
+                data:
+                  entity_id: light.wled_light
+                  brightness: !lambda return x;
+
+        - type: button
+          position: 230, 182
+          dimensions: 60x50
+          text: "Lamp"
+          #icon: 󰟕
+          toggle: true
+          enabled: return true;
+          checked: |-
+            if(id(light_02_state).state == "on") { return 1; }
+            else { return 0; }
+          on_turn_on:
+            - homeassistant.service:
+                service: light.turn_on
+                data:
+                  entity_id: light.wled_light
+            - switch.turn_on: light_switch_02
+          on_turn_off:
+            - homeassistant.service:
+                service: light.turn_off
+                data:
+                  entity_id: light.wled_light
+            - switch.turn_off: light_switch_02
+
+    - name: ${SCREEN_THERMOSTAT}
+      widgets:
+        - type: button
+          position: 0, 10
+          dimensions: 48x220
+          icon: 󰅁
+          enabled: return true;
+          on_click:
+            - lambda: id(deck).switch_screen("$SCREEN_MAIN");
+
+        - type: value-card
+          id: thermostat_info_01
+          position: 58, 10
+          value: |-
+            char buff[10] = "-";
+            sprintf(buff, "%.1f", id(thermostat_current).state);
+            return std::string(buff);
+          dimensions: 252x110
+          text: Current Temp, °C
+          icon: 󰔏
+          enabled: return true;
+
+        - type: button
+          position: 58, 130
+          dimensions: 76x100
+          #text: "Minus"
+          icon: 󰁅
+          enabled: return true;
+          on_click:
+            - homeassistant.service:
+                service: climate.set_temperature
+                data:
+                  entity_id: $THERMOSTAT_ENTITY
+                data_template:
+                  temperature: '{{ my_variable }}'
+                variables:
+                  my_variable: |-
+                    return id(thermostat_set).state - 0.5;
+
+        - type: value-card
+          position: 146, 130
+          dimensions: 76x100
+          id: thermostat_info_02
+          value: |-
+            char buff[10] = "-";
+            sprintf(buff, "%.1f", id(thermostat_set).state);
+            return std::string(buff);
+          text: Set
+          icon: 󰔏
+          enabled: return true;
+
+        - type: button
+          position: 234, 130
+          dimensions: 76x100
+          #text: "Plus"
+          icon: 󰁝
+          enabled: return true;
+          on_click:
+            - homeassistant.service:
+                service: climate.set_temperature
+                data:
+                  entity_id: $THERMOSTAT_ENTITY
+                data_template:
+                  temperature: '{{ my_variable }}'
+                variables:
+                  my_variable: |-
+                    return id(thermostat_set).state + 0.5;
+
+    - name: ${SCREEN_TEMPS}
+      widgets:
+        - type: button
+          position: 10, 10
+          dimensions: 75x105
+          icon: 󰁍
+          enabled: |-
+            return true;
+          on_click:
+            then:
+            - lambda: |-
+                id(deck).switch_screen("$SCREEN_MAIN");
+
+        - type: value-card
+          position: 95, 10
+          dimensions: 103x105
+          text: Bedroom
+          icon: 󰔏
+          enabled: return true;
+          value: |-
+            char buff[10] = "-";
+            sprintf(buff, "%.1f", id(thermostat_current).state);
+            return std::string(buff);
+
+        - type: value-card
+          position: 208, 10
+          dimensions: 103x105
+          text: Cabinet
+          icon: 󰔏
+          enabled: return true;
+          value: |-
+            char buff[10] = "-";
+            sprintf(buff, "%.1f", id(temp_cabinet).state);
+            return std::string(buff);
