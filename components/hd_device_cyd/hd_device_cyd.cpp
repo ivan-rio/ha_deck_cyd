@@ -83,6 +83,13 @@ void HaDeckDevice::setup() {
     lv_group_set_default(group);
 
     lcd.setBrightness(brightness_);
+
+    lv_obj_t * bg_color = lv_obj_create(lv_scr_act());
+    lv_obj_set_size(bg_color, 320, 240);
+    lv_obj_set_style_border_width(bg_color, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(bg_color, lv_color_hex(0x171717), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_parent(bg_color, lv_scr_act());
+
 }
 
 void HaDeckDevice::loop() {
